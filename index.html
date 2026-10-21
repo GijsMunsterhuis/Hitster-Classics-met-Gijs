@@ -113,6 +113,10 @@ button:disabled{opacity:.5}
         Scan kaartje
       </button>
 
+      <a class="btn ghost small" id="openApp2" href="spotify:">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm4.6 14.4a.75.75 0 01-1 .25c-2.8-1.7-6.4-2.1-10.6-1.2a.75.75 0 11-.3-1.46c4.6-1 8.6-.6 11.7 1.4.35.2.46.66.2 1zm1.3-3a.94.94 0 01-1.3.3c-3.2-2-8-2.5-11.8-1.4a.94.94 0 11-.55-1.8c4.3-1.3 9.6-.7 13.3 1.6.44.27.58.85.32 1.3zm.1-3.1C14.2 8 7.9 7.8 4.3 8.9a1.13 1.13 0 11-.66-2.16c4.2-1.3 11.1-1 15.5 1.6a1.13 1.13 0 01-1.15 1.95z"/></svg>
+        <span>Open de Spotify-app</span>
+      </a>
       <div class="bar" id="nowBox" hidden>
         <div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
         <div class="now" id="nowTxt">Speelt nu…</div>
@@ -140,13 +144,13 @@ button:disabled{opacity:.5}
 
   <div class="status" id="status" role="status" aria-live="polite"></div>
   <details id="diag" class="diag" hidden><summary>Technische details (stuur een screenshot)</summary><pre id="diagTxt"></pre></details>
-  <a class="btn primary" id="openApp" href="spotify:" hidden>Open Spotify</a>
-  <a class="btn ghost small" id="openSp" hidden target="_blank" rel="noopener">Noodknop: open dit nummer in Spotify (titel zichtbaar)</a>
+  <a class="btn primary" id="openApp" href="spotify:" hidden>Open de Spotify-app</a>
+  <a class="btn ghost small" id="openSp" hidden>Noodknop: open dit nummer in Spotify (titel zichtbaar)</a>
 
   <div class="foot">
     <button class="link" id="logout" type="button" hidden>Uitloggen</button>
     <button class="link" id="reset" type="button">Instellingen wissen</button>
-    <span class="link" style="text-decoration:none">versie 6</span>
+    <span class="link" style="text-decoration:none">versie 7</span>
   </div>
 </div>
 
@@ -172,12 +176,20 @@ const LS = {
   del(k){ try { localStorage.removeItem(k); } catch(e){} }
 };
 const PLAYLIST = 'spotify:playlist:6l8GKpzjyAO88qbBAFsJSx';
+const CLIENT_ID = 'a9d1f582abe341cd86adcdf7b7e7797a';
+const cid = () => LS.get('hcg_cid') || CLIENT_ID;
 const SCOPES = 'user-modify-playback-state user-read-playback-state';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 let CARDS = {};
 let current = null;      // {id, card:[n,secs,title,artist,year]}
 let paused = false;
 let LAST_ERR = null;
+const ANDROID = /Android/i.test(navigator.userAgent);
+// opent de Spotify-app zelf (geen website); valt op Android terug op de Play Store, elders op de weblink
+function appLink(path, web){
+  if (ANDROID) return 'intent://' + path + '#Intent;scheme=spotify;package=com.spotify.music;' + (web ? 'S.browser_fallback_url=' + encodeURIComponent(web) + ';' : '') + 'end';
+  return 'spotify:' + path.replace(/\//g, ':');
+}
 let DIAG = [];
 const PAUSE_HTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg><span>Pauze</span>';
 const PLAY_HTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M7 5v14l12-7z"/></svg><span>Verder</span>';
@@ -194,7 +206,7 @@ async function login(){
   const verifier = randStr(64);
   const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   LS.set('hcg_verifier', verifier);
-  const p = new URLSearchParams({client_id: LS.get('hcg_cid'), response_type:'code', redirect_uri: REDIRECT,
+  const p = new URLSearchParams({client_id: cid(), response_type:'code', redirect_uri: REDIRECT,
     code_challenge_method:'S256', code_challenge: challenge, scope: SCOPES});
   location.href = 'https://accounts.spotify.com/authorize?' + p;
 }
@@ -211,13 +223,13 @@ async function handleRedirect(){
   if (q.get('error')) { history.replaceState(null,'',REDIRECT); status('Spotify gaf een fout: ' + q.get('error'), true); return; }
   const code = q.get('code'); if (!code) return;
   history.replaceState(null,'',REDIRECT);
-  await tokenRequest({grant_type:'authorization_code', code, redirect_uri: REDIRECT, client_id: LS.get('hcg_cid'), code_verifier: LS.get('hcg_verifier')});
+  await tokenRequest({grant_type:'authorization_code', code, redirect_uri: REDIRECT, client_id: cid(), code_verifier: LS.get('hcg_verifier')});
   LS.del('hcg_verifier');
 }
 async function accessToken(){
   const t = JSON.parse(LS.get('hcg_tok') || 'null'); if (!t) return null;
   if (Date.now() < t.exp) return t.access;
-  await tokenRequest({grant_type:'refresh_token', refresh_token: t.refresh, client_id: LS.get('hcg_cid')});
+  await tokenRequest({grant_type:'refresh_token', refresh_token: t.refresh, client_id: cid()});
   return JSON.parse(LS.get('hcg_tok')).access;
 }
 
@@ -256,7 +268,7 @@ function explain(e){
 async function playCurrent(pos=0){
   DIAG = []; $('diag').hidden = true;
   const link = 'https://open.spotify.com/track/' + current.id + '?context=' + encodeURIComponent(PLAYLIST);
-  $('openSp').href = link;
+  $('openSp').href = appLink('track/' + current.id, link);
   try {
     let dev = await pickDevice();
     if (!dev) {
@@ -362,8 +374,9 @@ $('reveal').onclick = () => { const a = $('answer'); a.hidden = !a.hidden; $('re
 $('logout').onclick = () => { LS.del('hcg_tok'); current = null; $('nowBox').hidden = true; route(); };
 $('reset').onclick = () => { ['hcg_tok','hcg_cid','hcg_verifier'].forEach(LS.del); current = null; $('nowBox').hidden = true; status('Instellingen gewist.'); route(); };
 
+$('openApp').href = $('openApp2').href = appLink('', 'https://open.spotify.com');
 function route(){
-  if (!LS.get('hcg_cid')) return show('vSetup');
+  if (!cid()) return show('vSetup');
   if (!LS.get('hcg_tok')) return show('vLogin');
   show('vPlay');
 }
