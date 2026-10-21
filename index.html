@@ -41,6 +41,11 @@ button,.btn{font-family:var(--display);font-size:22px;letter-spacing:.06em;text-
 button:focus-visible,.btn:focus-visible{outline:3px solid #fff;outline-offset:3px}
 button:disabled{opacity:.5}
 .big{min-height:120px;font-size:30px;border-radius:22px}
+.ic{width:18px;height:18px;fill:currentColor;flex:none}
+#seek{justify-content:flex-start;background:var(--ink);color:var(--cream);border:2px solid #2a281f;padding:14px 18px 14px 14px;gap:14px}
+#seek .circle{background:var(--cream)}#seek .circle svg{fill:var(--ink)}
+.seekLbl{display:flex;flex-direction:column;align-items:flex-start;white-space:nowrap;font-size:17px;letter-spacing:.08em;line-height:1.15;text-align:left}
+.seekTime{margin-left:auto;font-size:40px;letter-spacing:0}
 .circle{width:54px;height:54px;border-radius:50%;background:var(--ink);display:grid;place-items:center;flex:none}
 .circle svg{width:22px;height:22px;fill:var(--cream)}
 .primary .circle{background:var(--ink)}
@@ -105,12 +110,13 @@ button:disabled{opacity:.5}
         <div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
         <div class="now" id="nowTxt">Speelt nu…</div>
         <div class="row">
-          <button class="ghost small" id="restart" type="button">⏮ Opnieuw</button>
-          <button class="ghost small" id="pause" type="button">⏸ Pauze</button>
+          <button class="ghost small" id="restart" type="button"><svg class="ic" viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg><span>Opnieuw</span></button>
+          <button class="ghost small" id="pause" type="button"><svg class="ic" viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg><span>Pauze</span></button>
         </div>
         <button class="primary" id="seek" type="button">
           <span class="circle"><svg viewBox="0 0 24 24"><path d="M4 5v14l8-7zM12 5v14l8-7z"/></svg></span>
-          <span id="seekTxt">Lastig??? Spoel door</span>
+          <span class="seekLbl"><span>Lastig???</span><span>Spoel door naar:</span></span>
+          <span class="seekTime" id="seekTxt">0:00</span>
         </button>
         <button class="ghost small" id="reveal" type="button">Toon antwoord</button>
         <div class="panel" id="answer" hidden>
@@ -126,7 +132,8 @@ button:disabled{opacity:.5}
   </section>
 
   <div class="status" id="status" role="status" aria-live="polite"></div>
-  <a class="btn ghost small" id="openSp" hidden target="_blank" rel="noopener">Open in Spotify-app</a>
+  <a class="btn primary" id="openApp" href="spotify:" hidden>Open Spotify</a>
+  <a class="btn ghost small" id="openSp" hidden target="_blank" rel="noopener">Noodknop: open dit nummer in Spotify (titel zichtbaar)</a>
 
   <div class="foot">
     <button class="link" id="logout" type="button" hidden>Uitloggen</button>
@@ -161,6 +168,9 @@ const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '')
 let CARDS = {};
 let current = null;      // {id, card:[n,secs,title,artist,year]}
 let paused = false;
+let LAST_ERR = null;
+const PAUSE_HTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg><span>Pauze</span>';
+const PLAY_HTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M7 5v14l12-7z"/></svg><span>Verder</span>';
 
 // ---------- UI helpers
 function show(view){ ['vSetup','vLogin','vPlay'].forEach(v => $(v).hidden = v !== view); $('logout').hidden = view !== 'vPlay'; }
@@ -213,8 +223,15 @@ async function api(method, path, body, retry=true){
   return j;
 }
 async function pickDevice(){
-  const {devices=[]} = await api('GET','/me/player/devices');
-  return devices.find(d => d.is_active) || devices.find(d => d.type === 'Smartphone') || devices[0] || null;
+  // iPhone: Spotify verdwijnt snel uit de lijst als hij op pauze in de achtergrond staat; daarom een paar keer proberen
+  for (let i = 0; i < 3; i++) {
+    const {devices=[]} = await api('GET','/me/player/devices');
+    const d = devices.find(d => d.is_active) || devices.find(d => d.type === 'Smartphone') || devices[0];
+    if (d) { LS.set('hcg_dev', d.id); return d; }
+    try { const p = await api('GET','/me/player'); if (p && p.device && p.device.id) return p.device; } catch(e) {}
+    await new Promise(r => setTimeout(r, 800));
+  }
+  return null;
 }
 function explain(e){
   if (e.reason === 'PREMIUM_REQUIRED' || /premium/i.test(e.message)) return 'Spotify Premium is nodig om af te spelen.';
@@ -226,11 +243,16 @@ async function playCurrent(pos=0){
   const link = 'https://open.spotify.com/track/' + current.id + '?context=' + encodeURIComponent(PLAYLIST);
   $('openSp').href = link;
   try {
-    const dev = await pickDevice();
-    if (!dev) { status('Geen Spotify-apparaat gevonden. Open de Spotify-app op je telefoon, speel heel even iets af, kom terug en druk op "Opnieuw".', true); $('openSp').hidden = false; return; }
+    let dev = await pickDevice();
+    if (!dev) {
+      // laatste poging: zonder apparaat-ID, Spotify kiest dan zelf het actieve apparaat
+      try { await api('PUT', '/me/player/play', {uris:['spotify:track:' + current.id], position_ms: pos}); dev = {name:'je actieve Spotify'}; } catch(e) { LAST_ERR = e; }
+    }
+    if (dev && !dev.id) { paused = false; $('nowBox').classList.remove('paused'); $('pause').innerHTML = PAUSE_HTML; status('Speelt af op ' + dev.name); $('openSp').hidden = true; $('openApp').hidden = true; return; }
+    if (!dev) { status('Spotify is niet actief. Druk op "Open Spotify", zet daar een willekeurig nummer aan en laat het doorspelen. Kom terug en druk op "Opnieuw".' + (LAST_ERR ? ' [Spotify: ' + (LAST_ERR.reason || LAST_ERR.status) + ']' : ''), true); $('openApp').hidden = false; $('openSp').hidden = false; return; }
     await api('PUT', '/me/player/play?device_id=' + encodeURIComponent(dev.id), {uris:['spotify:track:' + current.id], position_ms: pos});
-    paused = false; $('nowBox').classList.remove('paused'); $('pause').textContent = '⏸ Pauze';
-    status('Speelt af op: ' + dev.name); $('openSp').hidden = true;
+    paused = false; $('nowBox').classList.remove('paused'); $('pause').innerHTML = PAUSE_HTML;
+    status('Speelt af op: ' + dev.name); $('openSp').hidden = true; $('openApp').hidden = true;
   } catch(e) { status(explain(e), true); $('openSp').hidden = false; }
 }
 
@@ -243,7 +265,7 @@ function onCode(text){
   $('nowBox').hidden = false; $('answer').hidden = true; $('reveal').textContent = 'Toon antwoord';
   $('nowTxt').textContent = card ? 'Kaart gescand, speelt nu…' : 'Onbekend kaartje, speelt nu…';
   if (card) {
-    $('seekTxt').textContent = 'Lastig??? Spoel door naar ' + mmss(card[1]);
+    $('seekTxt').textContent = mmss(card[1]);
     $('seek').hidden = card[1] === 0;
     $('aNum').textContent = String(card[0]).padStart(3,'0'); $('aYear').textContent = card[4];
     $('aArtist').textContent = card[3]; $('aTitle').textContent = card[2];
@@ -300,8 +322,8 @@ $('restart').onclick = () => current && playCurrent(0);
 $('pause').onclick = async () => {
   if (!current) return;
   try {
-    if (paused) { await api('PUT','/me/player/play'); paused = false; $('pause').textContent = '⏸ Pauze'; }
-    else { await api('PUT','/me/player/pause'); paused = true; $('pause').textContent = '▶ Verder'; }
+    if (paused) { await api('PUT','/me/player/play'); paused = false; $('pause').innerHTML = PAUSE_HTML; }
+    else { await api('PUT','/me/player/pause'); paused = true; $('pause').innerHTML = PLAY_HTML; }
     $('nowBox').classList.toggle('paused', paused);
   } catch(e) { status(explain(e), true); }
 };
@@ -321,6 +343,11 @@ function route(){
 }
 
 (async () => {
+  if (location.protocol === 'file:') {
+    document.querySelector('.app').innerHTML = '<img class="logo" src="icon-512.png" alt="Hitster Classics met Gijs"><div class="bar"><h2>Nog niet online</h2>' +
+      '<p>Je hebt het bestand rechtstreeks van je computer geopend. De app werkt pas als hij online staat. Zet de bestanden eerst op GitHub Pages en open dan https://JOUWNAAM.github.io/hitster-gijs/ op je telefoon.</p></div>';
+    return;
+  }
   try { CARDS = await (await fetch('cards.json', {cache:'no-cache'})).json(); } catch(e) { status('Kaartgegevens konden niet laden.', true); }
   try { await handleRedirect(); } catch(e) { status(e.message, true); }
   route();
