@@ -55,6 +55,11 @@ button:disabled{opacity:.5}
 .status{font-family:var(--display);font-size:16px;letter-spacing:.05em;text-transform:uppercase;line-height:1.35;color:var(--muted);text-align:center;min-height:20px}
 .status.err{color:var(--bad)}
 .now{font-size:16px;text-align:center;letter-spacing:.08em;text-transform:uppercase;color:var(--cream2)}
+.tbox{text-transform:uppercase;letter-spacing:.06em;display:grid;grid-template-columns:54px 1fr auto;align-items:center;gap:10px 14px;background:var(--ink);color:var(--cream);border:2px solid #2a281f;border-radius:16px;padding:14px 20px 14px 14px}
+.tbox .circle{background:var(--cream)}.tbox .circle svg{fill:var(--ink)}
+.tbar{grid-column:1 / -1;height:8px;border-radius:4px;background:#2a281f;overflow:hidden}
+.tbar i{display:block;height:100%;width:100%;background:var(--cream);border-radius:4px;transform-origin:left;transition:transform .25s linear}
+.tbox.low .seekTime,.tbox.low .seekLbl{color:var(--bad)}.tbox.low .tbar i{background:var(--bad)}
 .eq{display:flex;gap:6px;justify-content:center;align-items:flex-end;height:46px}
 .eq i{width:10px;background:var(--cream);border-radius:3px;animation:eq 1s ease-in-out infinite}
 .eq i:nth-child(2){animation-delay:-.3s}.eq i:nth-child(3){animation-delay:-.6s}.eq i:nth-child(4){animation-delay:-.15s}.eq i:nth-child(5){animation-delay:-.45s}
@@ -78,6 +83,9 @@ button:disabled{opacity:.5}
 .scanbar{position:absolute;left:0;right:0;bottom:0;padding:18px max(16px,env(safe-area-inset-right,0)) calc(18px + env(safe-area-inset-bottom,0)) max(16px,env(safe-area-inset-left,0));display:flex;flex-direction:column;gap:10px;align-items:stretch}
 .scanbar p{text-align:center;color:var(--cream)}
 .diag{color:var(--muted);font-size:14px}.diag summary{cursor:pointer;text-align:center;letter-spacing:.05em}.diag pre{white-space:pre-wrap;font:13px ui-monospace,Menlo,monospace;background:var(--ink2);border-radius:10px;padding:10px;color:var(--cream2)}
+.modal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.72);display:grid;place-items:center;padding:24px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
+.mbox{background:var(--ink2);border:2px solid #2a281f;border-radius:18px;padding:22px 18px 18px;max-width:400px;width:100%;display:flex;flex-direction:column;gap:12px;text-align:center}
+.mbox h2{font-size:24px}
 .foot{margin-top:auto;display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
 .link{background:none;border:0;color:var(--muted);font:15px var(--display);text-decoration:underline;min-height:0;padding:6px;text-transform:none;letter-spacing:0}
 [hidden]{display:none!important}
@@ -130,6 +138,12 @@ button:disabled{opacity:.5}
           <span class="seekLbl"><span>Lastig???</span><span>Spoel door naar:</span></span>
           <span class="seekTime" id="seekTxt">0:00</span>
         </button>
+        <div class="tbox" id="timer" role="timer">
+          <span class="circle"><svg viewBox="0 0 24 24" style="fill:none;stroke:var(--ink);stroke-width:2.4;stroke-linecap:round"><path d="M9 2h6M12 2v3"/><circle cx="12" cy="14" r="7.5"/><path d="M12 14V9.5M12 14l3 2"/></svg></span>
+          <span class="seekLbl"><span>Tijd om</span><span>te raden:</span></span>
+          <span class="seekTime" id="tNum">0:30</span>
+          <span class="tbar"><i id="tArc"></i></span>
+        </div>
         <button class="ghost small" id="reveal" type="button">Toon antwoord</button>
         <div class="ans" id="answer" hidden>
           <div class="ansNum"><span id="aNum"></span><i></i></div>
@@ -149,13 +163,11 @@ button:disabled{opacity:.5}
 
   <div class="status" id="status" role="status" aria-live="polite"></div>
   <details id="diag" class="diag" hidden><summary>Technische details (stuur een screenshot)</summary><pre id="diagTxt"></pre></details>
-  <a class="btn primary" id="openApp" href="spotify:" hidden>Open de Spotify-app</a>
-  <a class="btn ghost small" id="openSp" hidden>Noodknop: open dit nummer in Spotify (titel zichtbaar)</a>
 
   <div class="foot">
     <button class="link" id="logout" type="button" hidden>Uitloggen</button>
     <button class="link" id="reset" type="button">Instellingen wissen</button>
-    <span class="link" style="text-decoration:none">versie 8</span>
+    <span class="link" style="text-decoration:none">versie 11</span>
   </div>
 </div>
 
@@ -169,6 +181,16 @@ button:disabled{opacity:.5}
   </div>
 </div>
 <canvas id="cv" hidden></canvas>
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="mTitle">
+  <div class="mbox">
+    <h2 id="mTitle"></h2>
+    <p id="mText"></p>
+    <div class="row">
+      <button class="primary small" id="mNo" type="button">Annuleren</button>
+      <button class="ghost small" id="mYes" type="button">Ja</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
@@ -272,16 +294,14 @@ function explain(e){
 }
 async function playCurrent(pos=0){
   DIAG = []; $('diag').hidden = true;
-  const link = 'https://open.spotify.com/track/' + current.id + '?context=' + encodeURIComponent(PLAYLIST);
-  $('openSp').href = appLink('track/' + current.id, link);
   try {
     let dev = await pickDevice();
     if (!dev) {
       // laatste poging: zonder apparaat-ID, Spotify kiest dan zelf het actieve apparaat
       try { await api('PUT', '/me/player/play', {uris:['spotify:track:' + current.id], position_ms: pos}); dev = {name:'je actieve Spotify'}; } catch(e) { LAST_ERR = e; }
     }
-    if (dev && !dev.id) { paused = false; $('nowBox').classList.remove('paused'); $('pause').innerHTML = PAUSE_HTML; status('Speelt af op ' + dev.name); $('openSp').hidden = true; $('openApp').hidden = true; return; }
-    if (!dev) { status('Spotify is niet actief. Druk op "Open Spotify", zet daar een willekeurig nummer aan en laat het doorspelen. Kom terug en druk op "Opnieuw".' + (LAST_ERR ? ' [Spotify: ' + (LAST_ERR.reason || LAST_ERR.status) + ']' : ''), true); $('openApp').hidden = false; $('openSp').hidden = false; return; }
+    if (dev && !dev.id) { paused = false; $('nowBox').classList.remove('paused'); $('pause').innerHTML = PAUSE_HTML; status('Speelt af op ' + dev.name); return true; }
+    if (!dev) { status('Spotify is niet actief. Druk op "Open de Spotify-app" (bovenaan), zet daar een willekeurig nummer aan en laat het doorspelen. Kom terug en druk op "Opnieuw".' + (LAST_ERR ? ' [Spotify: ' + (LAST_ERR.reason || LAST_ERR.status) + ']' : ''), true); return; }
     const tr = 'spotify:track:' + current.id;
     const bodies = [{context_uri: PLAYLIST, offset:{uri: tr}, position_ms: pos}, {uris:[tr], position_ms: pos}];
     const q = '?device_id=' + encodeURIComponent(dev.id);
@@ -295,9 +315,25 @@ async function playCurrent(pos=0){
     }
     if (!ok) { lastE.first = first; throw lastE; }
     paused = false; $('nowBox').classList.remove('paused'); $('pause').innerHTML = PAUSE_HTML;
-    status('Speelt af op: ' + dev.name); $('openSp').hidden = true; $('openApp').hidden = true;
-  } catch(e) { status(explain(e) + ' [Spotify: ' + (e.reason || e.status || '?') + (e.first ? ' / ' + (e.first.reason || e.first.status) : '') + ']', true); $('openApp').hidden = false; $('openSp').hidden = false; showDiag(); }
+    status('Speelt af op: ' + dev.name);
+    return true;
+  } catch(e) { status(explain(e) + ' [Spotify: ' + (e.reason || e.status || '?') + (e.first ? ' / ' + (e.first.reason || e.first.status) : '') + ']', true); showDiag(); }
 }
+
+
+// ---------- aftelklok (30 → 0); het nummer speelt gewoon door
+let tInt = 0, tEnd = 0;
+const T = 30;
+function drawTimer(){
+  const left = Math.max(0, (tEnd - Date.now()) / 1000), n = Math.ceil(left);
+  $('tNum').textContent = left > 0 ? '0:' + String(n).padStart(2,'0') : 'TIJD!';
+  $('tArc').style.transform = 'scaleX(' + (left / T) + ')';
+  $('timer').classList.toggle('low', left > 0 && n <= 5);
+  $('timer').classList.toggle('low', left <= 0 || n <= 5);
+  if (left <= 0) { clearInterval(tInt); tInt = 0; if (navigator.vibrate) navigator.vibrate([200, 100, 200]); }
+}
+function startTimer(){ stopTimer(); tEnd = Date.now() + T * 1000; drawTimer(); tInt = setInterval(drawTimer, 200); }
+function stopTimer(){ clearInterval(tInt); tInt = 0; $('tNum').textContent = '0:' + T; $('tArc').style.transform = 'scaleX(1)'; $('timer').classList.remove('low'); }
 
 // ---------- kaart verwerken
 function onCode(text){
@@ -314,7 +350,8 @@ function onCode(text){
     $('aArtist').textContent = card[3]; { const m = card[2].match(/^(.*?)\s(\(.*\))$/); $('aTitle').textContent = m ? m[1] : card[2]; $('aSub').textContent = m ? m[2] : ''; }
   } else { $('seek').hidden = true; }
   $('reveal').hidden = !card;
-  playCurrent(0);
+  stopTimer();
+  playCurrent(0).then(ok => { if (ok) startTimer(); });
 }
 
 // ---------- scanner
@@ -354,6 +391,17 @@ function stopScan(){
   stream = null; $('scanView').hidden = true;
 }
 
+// ---------- bevestigingsvenster (in de pagina zelf)
+function ask(title, text, yes){
+  return new Promise(res => {
+    $('mTitle').textContent = title; $('mText').textContent = text; $('mYes').textContent = yes || 'Ja';
+    $('modal').hidden = false; $('mNo').focus();
+    const done = v => { $('modal').hidden = true; $('mYes').onclick = $('mNo').onclick = null; res(v); };
+    $('mYes').onclick = () => done(true); $('mNo').onclick = () => done(false);
+    $('modal').onclick = e => { if (e.target === $('modal')) done(false); };
+  });
+}
+
 // ---------- knoppen
 $('ruri').textContent = REDIRECT;
 $('copyUri').onclick = () => { navigator.clipboard.writeText(REDIRECT).then(() => status('Redirect URI gekopieerd.'), () => status('Kopiëren lukte niet; selecteer de tekst en kopieer hem zelf.', true)); };
@@ -376,10 +424,10 @@ $('seek').onclick = async () => {
   catch(e) { status(explain(e), true); showDiag(); }
 };
 $('reveal').onclick = () => { const a = $('answer'); a.hidden = !a.hidden; $('reveal').textContent = a.hidden ? 'Toon antwoord' : 'Verberg antwoord'; };
-$('logout').onclick = () => { LS.del('hcg_tok'); current = null; $('nowBox').hidden = true; route(); };
-$('reset').onclick = () => { ['hcg_tok','hcg_cid','hcg_verifier'].forEach(LS.del); current = null; $('nowBox').hidden = true; status('Instellingen gewist.'); route(); };
+$('logout').onclick = async () => { if (!await ask('Wil je echt uitloggen?', 'Daarna moet je opnieuw inloggen met Spotify.', 'Ja, uitloggen')) return; LS.del('hcg_tok'); current = null; $('nowBox').hidden = true; route(); };
+$('reset').onclick = async () => { if (!await ask('Instellingen wissen?', 'Je wordt uitgelogd en moet daarna opnieuw inloggen met Spotify.', 'Ja, wissen')) return; ['hcg_tok','hcg_cid','hcg_verifier'].forEach(LS.del); current = null; $('nowBox').hidden = true; status('Instellingen gewist.'); route(); };
 
-$('openApp').href = $('openApp2').href = appLink('', 'https://open.spotify.com');
+$('openApp2').href = appLink('', 'https://open.spotify.com');
 function route(){
   if (!cid()) return show('vSetup');
   if (!LS.get('hcg_tok')) return show('vLogin');
