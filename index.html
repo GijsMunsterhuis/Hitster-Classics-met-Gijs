@@ -26,12 +26,12 @@ body{margin:0;background:var(--ink);color:var(--cream);font-family:var(--display
 .app{max-width:460px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;gap:18px;padding-block:22px 28px}
 .logo{display:block;width:min(78%,300px);margin:0 auto;border-radius:14px}
 h2{font-size:26px;margin:0;letter-spacing:.02em;text-transform:uppercase}
-p{margin:0;line-height:1.4;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:var(--cream2)}
+p{margin:0;line-height:1.35;font-family:var(--display);font-size:17px;letter-spacing:.02em;color:var(--cream2)}
 .panel{background:var(--cream);color:var(--ink);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:12px}
 .panel p{color:#3b372c}
 .label{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#5d574a}
-input{font:16px Arial,sans-serif;padding:12px;border-radius:10px;border:2px solid var(--ink);background:#fff;color:var(--ink);width:100%}
-code{font:13px ui-monospace,Menlo,monospace;background:#fff;border:1px dashed #8a8270;border-radius:8px;padding:8px;display:block;word-break:break-all;color:var(--ink)}
+input{font:18px var(--display);letter-spacing:.04em;padding:12px;border-radius:10px;border:2px solid var(--ink);background:#fff;color:var(--ink);width:100%}
+code{font:15px var(--display);letter-spacing:.02em;background:#fff;border:1px dashed #8a8270;border-radius:8px;padding:8px;display:block;word-break:break-all;color:var(--ink)}
 button,.btn{font-family:var(--display);font-size:22px;letter-spacing:.06em;text-transform:uppercase;border:0;border-radius:16px;padding:16px 18px;cursor:pointer;
   display:flex;align-items:center;justify-content:center;gap:12px;text-decoration:none;min-height:60px}
 .primary{background:var(--cream);color:var(--ink)}
@@ -45,14 +45,14 @@ button:disabled{opacity:.5}
 #seek{justify-content:flex-start;background:var(--ink);color:var(--cream);border:2px solid #2a281f;padding:14px 18px 14px 14px;gap:14px}
 #seek .circle{background:var(--cream)}#seek .circle svg{fill:var(--ink)}
 .seekLbl{display:flex;flex-direction:column;align-items:flex-start;white-space:nowrap;font-size:17px;letter-spacing:.08em;line-height:1.15;text-align:left}
-.seekTime{margin-left:auto;font-size:40px;letter-spacing:0}
+.seekTime{margin-left:auto;font-size:36px;padding-right:4px;letter-spacing:0}
 .circle{width:54px;height:54px;border-radius:50%;background:var(--ink);display:grid;place-items:center;flex:none}
 .circle svg{width:22px;height:22px;fill:var(--cream)}
 .primary .circle{background:var(--ink)}
 .row{display:flex;gap:10px}
 .row>*{flex:1}
 .bar{background:var(--ink2);border:2px solid #2a281f;border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:12px}
-.status{font-family:Arial,sans-serif;font-size:14px;color:var(--muted);text-align:center;min-height:20px}
+.status{font-family:var(--display);font-size:16px;letter-spacing:.05em;text-transform:uppercase;line-height:1.35;color:var(--muted);text-align:center;min-height:20px}
 .status.err{color:var(--bad)}
 .now{font-size:20px;text-align:center;letter-spacing:.08em;text-transform:uppercase;color:var(--cream2)}
 .eq{display:flex;gap:6px;justify-content:center;align-items:flex-end;height:46px}
@@ -71,7 +71,7 @@ button:disabled{opacity:.5}
 .scanbar{position:absolute;left:0;right:0;bottom:0;padding:18px max(16px,env(safe-area-inset-right,0)) calc(18px + env(safe-area-inset-bottom,0)) max(16px,env(safe-area-inset-left,0));display:flex;flex-direction:column;gap:10px;align-items:stretch}
 .scanbar p{text-align:center;color:var(--cream)}
 .foot{margin-top:auto;display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
-.link{background:none;border:0;color:var(--muted);font:14px Arial,sans-serif;text-decoration:underline;min-height:0;padding:6px;text-transform:none;letter-spacing:0}
+.link{background:none;border:0;color:var(--muted);font:15px var(--display);text-decoration:underline;min-height:0;padding:6px;text-transform:none;letter-spacing:0}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -250,10 +250,17 @@ async function playCurrent(pos=0){
     }
     if (dev && !dev.id) { paused = false; $('nowBox').classList.remove('paused'); $('pause').innerHTML = PAUSE_HTML; status('Speelt af op ' + dev.name); $('openSp').hidden = true; $('openApp').hidden = true; return; }
     if (!dev) { status('Spotify is niet actief. Druk op "Open Spotify", zet daar een willekeurig nummer aan en laat het doorspelen. Kom terug en druk op "Opnieuw".' + (LAST_ERR ? ' [Spotify: ' + (LAST_ERR.reason || LAST_ERR.status) + ']' : ''), true); $('openApp').hidden = false; $('openSp').hidden = false; return; }
-    await api('PUT', '/me/player/play?device_id=' + encodeURIComponent(dev.id), {uris:['spotify:track:' + current.id], position_ms: pos});
+    const body = {uris:['spotify:track:' + current.id], position_ms: pos};
+    try { await api('PUT', '/me/player/play?device_id=' + encodeURIComponent(dev.id), body); }
+    catch(e1) {
+      // iPhone in de achtergrond: eerst het afspelen naar dit apparaat overzetten, dan opnieuw
+      try { await api('PUT', '/me/player', {device_ids:[dev.id], play:true}); await new Promise(r => setTimeout(r, 900));
+            await api('PUT', '/me/player/play?device_id=' + encodeURIComponent(dev.id), body); }
+      catch(e2) { try { await api('PUT', '/me/player/play', body); } catch(e3) { e3.first = e1; throw e3; } }
+    }
     paused = false; $('nowBox').classList.remove('paused'); $('pause').innerHTML = PAUSE_HTML;
     status('Speelt af op: ' + dev.name); $('openSp').hidden = true; $('openApp').hidden = true;
-  } catch(e) { status(explain(e), true); $('openSp').hidden = false; }
+  } catch(e) { status(explain(e) + ' [Spotify: ' + (e.reason || e.status || '?') + (e.first ? ' / ' + (e.first.reason || e.first.status) : '') + ']', true); $('openApp').hidden = false; $('openSp').hidden = false; }
 }
 
 // ---------- kaart verwerken
