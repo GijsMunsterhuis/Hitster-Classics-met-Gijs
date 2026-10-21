@@ -138,6 +138,7 @@ button:disabled{opacity:.5}
   <div class="foot">
     <button class="link" id="logout" type="button" hidden>Uitloggen</button>
     <button class="link" id="reset" type="button">Instellingen wissen</button>
+    <span class="link" style="text-decoration:none">versie 5</span>
   </div>
 </div>
 
@@ -250,14 +251,18 @@ async function playCurrent(pos=0){
     }
     if (dev && !dev.id) { paused = false; $('nowBox').classList.remove('paused'); $('pause').innerHTML = PAUSE_HTML; status('Speelt af op ' + dev.name); $('openSp').hidden = true; $('openApp').hidden = true; return; }
     if (!dev) { status('Spotify is niet actief. Druk op "Open Spotify", zet daar een willekeurig nummer aan en laat het doorspelen. Kom terug en druk op "Opnieuw".' + (LAST_ERR ? ' [Spotify: ' + (LAST_ERR.reason || LAST_ERR.status) + ']' : ''), true); $('openApp').hidden = false; $('openSp').hidden = false; return; }
-    const body = {uris:['spotify:track:' + current.id], position_ms: pos};
-    try { await api('PUT', '/me/player/play?device_id=' + encodeURIComponent(dev.id), body); }
-    catch(e1) {
-      // iPhone in de achtergrond: eerst het afspelen naar dit apparaat overzetten, dan opnieuw
-      try { await api('PUT', '/me/player', {device_ids:[dev.id], play:true}); await new Promise(r => setTimeout(r, 900));
-            await api('PUT', '/me/player/play?device_id=' + encodeURIComponent(dev.id), body); }
-      catch(e2) { try { await api('PUT', '/me/player/play', body); } catch(e3) { e3.first = e1; throw e3; } }
+    const tr = 'spotify:track:' + current.id;
+    const bodies = [{context_uri: PLAYLIST, offset:{uri: tr}, position_ms: pos}, {uris:[tr], position_ms: pos}];
+    const q = '?device_id=' + encodeURIComponent(dev.id);
+    let ok = false, first = null, lastE = null;
+    // 1) binnen je playlist, 2) los nummer; telkens op je telefoon
+    for (const b of bodies) { try { await api('PUT', '/me/player/play' + q, b); ok = true; break; } catch(e) { first = first || e; lastE = e; } }
+    if (!ok) {
+      // 3) afspelen eerst naar je telefoon overzetten en opnieuw proberen
+      try { await api('PUT', '/me/player', {device_ids:[dev.id], play:false}); await new Promise(r => setTimeout(r, 900)); } catch(e) {}
+      for (const b of bodies) { try { await api('PUT', '/me/player/play' + q, b); ok = true; break; } catch(e) { lastE = e; } }
     }
+    if (!ok) { lastE.first = first; throw lastE; }
     paused = false; $('nowBox').classList.remove('paused'); $('pause').innerHTML = PAUSE_HTML;
     status('Speelt af op: ' + dev.name); $('openSp').hidden = true; $('openApp').hidden = true;
   } catch(e) { status(explain(e) + ' [Spotify: ' + (e.reason || e.status || '?') + (e.first ? ' / ' + (e.first.reason || e.first.status) : '') + ']', true); $('openApp').hidden = false; $('openSp').hidden = false; }
